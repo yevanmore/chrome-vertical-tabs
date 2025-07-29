@@ -1,0 +1,10 @@
+/* Content Script样式 */
+#tab-priority-indicator {
+  pointer-events: none;
+  user-select: none;
+}
+
+#tab-priority-indicator * {
+  pointer-events: none;
+  user-select: none;
+}

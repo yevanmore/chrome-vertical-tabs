@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "标签页优先级管理器",
+  "version": "1.0",
+  "description": "智能管理浏览器标签页，支持二级优先级分类和访问统计",
+  
+  "permissions": [
+    "tabs",
+    "storage",
+    "activeTab"
+  ],
+  
+  "background": {
+    "service_worker": "background.js"
+  },
+  
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "标签页管理器"
+  },
+  
+  "commands": {
+    "mark-priority-1": {
+      "suggested_key": {
+        "default": "Alt+1",
+        "mac": "Command+1"
+      },
+      "description": "标记为常驻标签"
+    },
+    "mark-priority-3": {
+      "suggested_key": {
+        "default": "Alt+3",
+        "mac": "Command+3"
+      },
+      "description": "标记为已收纳标签"
+    },
+    "switch-priority-tabs": {
+      "suggested_key": {
+        "default": "Alt+D",
+        "mac": "Command+D"
+      },
+      "description": "在常驻标签间切换"
+    }
+  },
+  
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"]
+    }
+  ]
+}
