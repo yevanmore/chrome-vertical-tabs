@@ -63,6 +63,13 @@ class TabPriorityManager {
         // 静默处理错误
       }
     }, 30000);
+    
+    // 每10分钟检查一次是否需要重排
+    setInterval(async () => {
+      console.log('⏰ 定期检查标签排序');
+      await this.checkAutoPinning();
+      await this.sortTabsByFrequency();
+    }, 600000); // 10分钟
   }
 
   async initializeAllTabDisplays() {
@@ -257,6 +264,12 @@ class TabPriorityManager {
       // 立即更新标签页标题显示
       await this.updateTabDisplay(tabId);
       
+      // 检查是否需要自动设置为常驻标签
+      await this.checkAutoPinning();
+      
+      // 执行立即排序
+      await this.sortTabsByFrequency();
+      
       // 只对可以接收消息的页面发送消息
       if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
         try {
@@ -351,6 +364,84 @@ class TabPriorityManager {
     } catch (error) {
       console.error('批量关闭标签失败:', error);
       return 0;
+    }
+  }
+
+  async checkAutoPinning() {
+    try {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const tabsWithCounts = [];
+      
+      // 获取所有标签的访问次数
+      for (const tab of tabs) {
+        const accessCount = await this.getAccessCount(tab.id);
+        const priority = await this.getTabPriority(tab.id);
+        tabsWithCounts.push({
+          ...tab,
+          accessCount,
+          priority
+        });
+      }
+      
+      // 按访问次数排序
+      tabsWithCounts.sort((a, b) => b.accessCount - a.accessCount);
+      
+      // 计算前30%的数量
+      const top30PercentCount = Math.ceil(tabs.length * 0.3);
+      
+      // 自动将前30%标记为常驻
+      for (let i = 0; i < top30PercentCount; i++) {
+        const tab = tabsWithCounts[i];
+        if (tab.priority !== 1 && tab.accessCount > 0) {
+          console.log(`📌 自动设置常驻标签: ${tab.title} (访问次数: ${tab.accessCount})`);
+          await this.setTabPriority(tab.id, 1);
+        }
+      }
+      
+    } catch (error) {
+      console.error('自动标记常驻标签失败:', error);
+    }
+  }
+
+  async sortTabsByFrequency() {
+    try {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const tabsWithData = [];
+      
+      // 获取所有标签的数据
+      for (const tab of tabs) {
+        const accessCount = await this.getAccessCount(tab.id);
+        const priority = await this.getTabPriority(tab.id);
+        tabsWithData.push({
+          ...tab,
+          accessCount,
+          priority
+        });
+      }
+      
+      // 分组：常驻标签和已收纳标签
+      const priorityTabs = tabsWithData.filter(tab => tab.priority === 1);
+      const archivedTabs = tabsWithData.filter(tab => tab.priority === 3);
+      
+      // 分别按访问频率排序
+      priorityTabs.sort((a, b) => b.accessCount - a.accessCount);
+      archivedTabs.sort((a, b) => b.accessCount - a.accessCount);
+      
+      // 合并并重新排列标签
+      const sortedTabs = [...priorityTabs, ...archivedTabs];
+      
+      // 移动标签到正确位置
+      for (let i = 0; i < sortedTabs.length; i++) {
+        const tab = sortedTabs[i];
+        if (tab.index !== i) {
+          await chrome.tabs.move(tab.id, { index: i });
+        }
+      }
+      
+      console.log(`🔄 标签重新排序完成`);
+      
+    } catch (error) {
+      console.error('标签排序失败:', error);
     }
   }
 }

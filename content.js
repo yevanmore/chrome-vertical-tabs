@@ -179,8 +179,8 @@ class TabContentManager {
          if (window.extensionDebug) {
            window.extensionDebug.getCurrentTabInfo();
          }
-         // 直接调用刷新方法
-         document.querySelector('#access-count-display')?.click?.();
+         // 强制刷新访问计数
+         document.querySelector('#access-count-display')?.click?.() || this.requestAccessCount();
        }
     };
     
@@ -197,42 +197,8 @@ class TabContentManager {
   }
 
   addAccessCountDisplay() {
-    // 在页面右下角添加一个持久的访问计数显示器
-    const display = document.createElement('div');
-    display.id = 'access-count-display';
-    display.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      z-index: 10000;
-      background: rgba(0, 0, 0, 0.8);
-      color: white;
-      padding: 8px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 500;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      cursor: pointer;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      transition: background-color 0.2s;
-    `;
-    display.textContent = '访问次数: 加载中...';
-    
-    // 点击刷新功能
-    display.addEventListener('click', () => {
-      console.log('🖱️ 用户点击刷新访问计数');
-      this.forceRefreshAccessCount();
-      display.style.backgroundColor = 'rgba(76, 175, 80, 0.9)';
-      setTimeout(() => {
-        display.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-      }, 500);
-    });
-    
-    display.title = '点击刷新访问计数';
-    
-    document.body.appendChild(display);
-    
-    // 请求当前的访问次数
+    // 需求3已删除：不再添加右下角的访问计数显示器
+    // 请求当前的访问次数用于内部状态同步
     this.requestAccessCount();
   }
 
@@ -266,53 +232,13 @@ class TabContentManager {
   }
 
   updateAccessCountDisplay(count) {
-    const display = document.getElementById('access-count-display');
-    if (display) {
-      display.textContent = `访问次数: ${count}`;
-    }
+    // 需求3已删除：不再更新右下角显示器
+    console.log(`📊 访问计数更新: ${count}`);
   }
 
   showAccessCountNotification(count) {
-    // 更新持久显示器
+    // 需求3已删除：不再显示访问次数通知
     this.updateAccessCountDisplay(count);
-    
-    // 显示临时通知
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-      position: fixed;
-      top: 50px;
-      right: 20px;
-      z-index: 10001;
-      background: #4CAF50;
-      color: white;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      opacity: 0;
-      transition: all 0.3s ease;
-      pointer-events: none;
-    `;
-    notification.textContent = `访问次数: ${count} ↑`;
-    
-    document.body.appendChild(notification);
-    
-    // 显示动画
-    setTimeout(() => {
-      notification.style.opacity = '1';
-    }, 10);
-    
-    // 自动隐藏
-    setTimeout(() => {
-      notification.style.opacity = '0';
-      setTimeout(() => {
-        if (notification.parentNode) {
-          notification.remove();
-        }
-      }, 300);
-    }, 2000);
   }
 }
 

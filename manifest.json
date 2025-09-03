@@ -36,8 +36,8 @@
     },
     "switch-priority-tabs": {
       "suggested_key": {
-        "default": "Alt+D",
-        "mac": "Command+D"
+        "default": "Alt+Shift+Tab",
+        "mac": "Command+Shift+Tab"
       },
       "description": "在常驻标签间切换"
     }
