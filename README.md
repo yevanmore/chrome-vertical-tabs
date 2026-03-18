@@ -50,7 +50,7 @@
 ## 项目结构
 
 ```text
-adhd-tab-management/
+chrome-vertical-tabs/
 ├── manifest.json
 ├── background.js
 ├── popup.html
