@@ -1,6 +1,6 @@
-# ADHD Tab Management
+# Chrome Vertical Tabs
 
-一个面向高频浏览场景的 Chrome 扩展：把重要标签留在常驻区，把低频标签收纳到底部，并用访问次数驱动排序。
+Chrome Vertical Tabs 是一个面向高频浏览场景的 Chrome 扩展：把重要标签留在常驻区，把低频标签收纳到底部，并用访问次数驱动排序。
 
 ## 这次调整了什么
 
