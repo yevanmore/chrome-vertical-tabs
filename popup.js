@@ -5,260 +5,271 @@ class PopupManager {
   }
 
   async init() {
-    await this.loadTabs();
     this.bindEvents();
-  }
 
-  async loadTabs() {
     try {
-      // 发送消息到background script获取所有标签
-      const tabs = await this.sendMessage({ action: 'getAllTabs' });
-      this.tabs = tabs;
-      this.renderTabs();
-      
-      // 添加调试按钮
-      this.addDebugButton();
-      
-      // 隐藏loading，显示内容
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('content').style.display = 'block';
-      
+      await this.loadTabs();
     } catch (error) {
-      console.error('加载标签失败:', error);
+      console.error("初始化 popup 失败:", error);
+      this.showNotification("加载失败，请重新打开扩展", "error");
+    } finally {
+      this.toggleLoading(false);
     }
   }
 
+  async loadTabs() {
+    this.tabs = (await this.sendMessage({ action: "getAllTabs" })) || [];
+    this.renderTabs();
+  }
+
+  bindEvents() {
+    document.addEventListener("click", async (event) => {
+      const priorityButton = event.target.closest(".priority-btn");
+
+      if (priorityButton) {
+        event.stopPropagation();
+
+        const tabId = Number(priorityButton.dataset.tabId);
+        const priority = Number(priorityButton.dataset.priority);
+
+        if (!tabId || !priority || priorityButton.disabled) {
+          return;
+        }
+
+        try {
+          await this.sendMessage({
+            action: "setTabPriority",
+            tabId,
+            priority
+          });
+          await this.loadTabs();
+          this.showNotification("标签分组已更新");
+        } catch (error) {
+          console.error("更新标签优先级失败:", error);
+          this.showNotification("更新失败，请重试", "error");
+        }
+
+        return;
+      }
+
+      const tabCard = event.target.closest(".tab-card");
+
+      if (!tabCard) {
+        return;
+      }
+
+      const tabId = Number(tabCard.dataset.tabId);
+
+      if (!tabId) {
+        return;
+      }
+
+      try {
+        await this.sendMessage({ action: "switchToTab", tabId });
+        window.close();
+      } catch (error) {
+        console.error("切换标签失败:", error);
+        this.showNotification("切换失败，请重试", "error");
+      }
+    });
+
+    document.getElementById("close-archived").addEventListener("click", async () => {
+      if (!confirm("确定要关闭所有已收纳标签吗？此操作不可撤销。")) {
+        return;
+      }
+
+      try {
+        const closedCount = await this.sendMessage({
+          action: "closeTabsByPriority",
+          priority: 3
+        });
+
+        await this.loadTabs();
+
+        if (closedCount > 0) {
+          this.showNotification(`已关闭 ${closedCount} 个标签页`);
+        } else {
+          this.showNotification("没有可关闭的已收纳标签");
+        }
+      } catch (error) {
+        console.error("批量关闭标签失败:", error);
+        this.showNotification("关闭失败，请重试", "error");
+      }
+    });
+  }
+
   renderTabs() {
-    const priorityGroups = {
+    const groups = {
       1: [],
       3: []
     };
 
-    // 按优先级分组，跳过priority 2
-    this.tabs.forEach(tab => {
+    this.tabs.forEach((tab) => {
       if (tab.priority === 1 || tab.priority === 3) {
-        priorityGroups[tab.priority].push(tab);
+        groups[tab.priority].push(tab);
       }
     });
 
-    // 渲染每个优先级的标签
-    Object.keys(priorityGroups).forEach(priority => {
-      this.renderPriorityGroup(priority, priorityGroups[priority]);
-    });
+    this.updateStats(groups);
+    this.renderPriorityGroup(1, groups[1]);
+    this.renderPriorityGroup(3, groups[3]);
   }
 
   renderPriorityGroup(priority, tabs) {
     const container = document.getElementById(`priority-${priority}-tabs`);
     const countElement = document.getElementById(`priority-${priority}-count`);
-    
-    // 按访问次数排序（从高到低）
-    tabs.sort((a, b) => (b.accessCount || 0) - (a.accessCount || 0));
-    
-    countElement.textContent = tabs.length;
+    const sortedTabs = [...tabs].sort((a, b) => (b.accessCount || 0) - (a.accessCount || 0));
 
-    if (tabs.length === 0) {
-      container.innerHTML = '<div class="empty-state">暂无标签</div>';
+    countElement.textContent = String(sortedTabs.length);
+
+    if (sortedTabs.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          ${priority === 1
+            ? "还没有常驻标签。先把最重要的页面标到这一组。"
+            : "收纳区目前是空的，暂时没有待清理标签。"}
+        </div>
+      `;
       return;
     }
 
-    container.innerHTML = tabs.map(tab => `
-      <div class="tab-item" data-tab-id="${tab.id}">
-        <div class="tab-icon-container">
-          <img class="tab-favicon" src="${tab.favIconUrl || 'data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'><path fill=\'%23666\' d=\'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z\'/></svg>'}" 
-               onerror="this.src='data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'><path fill=\'%23666\' d=\'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z\'/></svg>'">
-          ${this.generateAccessIndicators(tab.accessCount || 0)}
-        </div>
-        <div class="tab-title" title="${this.escapeHtml(tab.title)}">${this.escapeHtml(tab.title)}${tab.accessCount && tab.accessCount > 0 ? ` (${tab.accessCount})` : ' (0)'}</div>
-        <div class="tab-actions">
-          <button class="priority-btn p1" data-priority="1" title="设为常驻">🔥</button>
-          <button class="priority-btn p3" data-priority="3" title="设为已收纳">📁</button>
-        </div>
-      </div>
-    `).join('');
+    container.innerHTML = sortedTabs.map((tab) => this.renderTabCard(tab)).join("");
   }
 
-  bindEvents() {
-    // 标签点击切换
-    document.addEventListener('click', async (e) => {
-      const tabItem = e.target.closest('.tab-item');
-      if (tabItem && !e.target.closest('.tab-actions')) {
-        const tabId = parseInt(tabItem.dataset.tabId);
-        console.log(`🖱️ 用户点击切换到标签 ${tabId}`);
-        await this.sendMessage({ action: 'switchToTab', tabId });
-        window.close();
-      }
-    });
+  renderTabCard(tab) {
+    const priorityLabel = tab.priority === 1 ? "🔥 常驻" : "📁 收纳";
+    const displayTitle = this.escapeHtml(this.getDisplayTitle(tab.title || "未命名标签"));
+    const host = this.escapeHtml(this.getDisplayHost(tab.url));
+    const count = tab.accessCount || 0;
+    const fallbackIcon = this.getFallbackIcon();
+    const favicon = this.escapeHtml(tab.favIconUrl || fallbackIcon);
+    const safeFallbackIcon = this.escapeHtml(fallbackIcon);
 
-    // 优先级按钮点击
-    document.addEventListener('click', async (e) => {
-      if (e.target.classList.contains('priority-btn')) {
-        e.stopPropagation();
-        const tabItem = e.target.closest('.tab-item');
-        const tabId = parseInt(tabItem.dataset.tabId);
-        const priority = parseInt(e.target.dataset.priority);
-        
-        await this.sendMessage({ 
-          action: 'setTabPriority', 
-          tabId, 
-          priority 
-        });
-        
-        // 重新加载标签列表
-        await this.loadTabs();
-      }
-    });
+    return `
+      <article class="tab-card ${tab.active ? "is-active" : ""}" data-tab-id="${tab.id}">
+        <div class="tab-main">
+          <div class="favicon-wrap">
+            <img
+              class="tab-favicon"
+              src="${favicon}"
+              data-fallback="${safeFallbackIcon}"
+              alt=""
+              referrerpolicy="no-referrer"
+              onerror="this.onerror=null;this.src=this.dataset.fallback;"
+            >
+            ${tab.active ? '<span class="active-dot"></span>' : ""}
+          </div>
+          <div class="tab-copy">
+            <div class="tab-title-row">
+              <span class="tab-title" title="${displayTitle}">${displayTitle}</span>
+              <span class="section-badge">${priorityLabel}</span>
+            </div>
+            <div class="tab-meta">
+              <span class="tab-host" title="${host}">${host}</span>
+              <span class="access-badge">${count > 0 ? `${count} 次访问` : "未计数"}</span>
+            </div>
+            <div class="heat-row">${this.renderHeatDots(count)}</div>
+          </div>
+        </div>
+        <div class="priority-actions">
+          <button
+            class="priority-btn ${tab.priority === 1 ? "is-active" : ""}"
+            data-tab-id="${tab.id}"
+            data-priority="1"
+            ${tab.priority === 1 ? "disabled" : ""}
+          >
+            🔥 常驻
+          </button>
+          <button
+            class="priority-btn ${tab.priority === 3 ? "is-active is-archived" : "is-archived"}"
+            data-tab-id="${tab.id}"
+            data-priority="3"
+            ${tab.priority === 3 ? "disabled" : ""}
+          >
+            📁 收纳
+          </button>
+        </div>
+      </article>
+    `;
+  }
 
-    // 批量清理按钮
-    document.getElementById('close-archived').addEventListener('click', async () => {
-      if (confirm('确定要关闭所有已收纳的标签吗？此操作不可撤销。')) {
-        const closedCount = await this.sendMessage({ 
-          action: 'closeTabsByPriority', 
-          priority: 3 
-        });
-        
-        if (closedCount > 0) {
-          await this.loadTabs();
-          this.showNotification(`已关闭 ${closedCount} 个标签页`);
-        }
-      }
-    });
+  updateStats(groups) {
+    document.getElementById("stat-total").textContent = String(this.tabs.length);
+    document.getElementById("stat-priority-1").textContent = String(groups[1].length);
+    document.getElementById("stat-priority-3").textContent = String(groups[3].length);
+  }
+
+  renderHeatDots(count) {
+    const thresholds = [1, 3, 6, 10, 20];
+    const activeDots = thresholds.filter((threshold) => count >= threshold).length;
+
+    return Array.from({ length: thresholds.length }, (_, index) => `
+      <span class="heat-dot ${index < activeDots ? "is-on" : ""}"></span>
+    `).join("");
+  }
+
+  getDisplayTitle(title) {
+    const cleaned = title.replace(
+      /^(?:(?:[🔥⭐📁]\s*)|(?:●{1,5}🔘{0,5}\s*)|(?:●{3}\[\d+\]\s*)|(?:⚡\[\d+\]\s*)|(?:\[\d+\]\s*))+/gu,
+      ""
+    ).trim();
+
+    return cleaned || title;
+  }
+
+  getDisplayHost(url) {
+    try {
+      const { hostname } = new URL(url);
+      return hostname.replace(/^www\./, "");
+    } catch (error) {
+      return "系统页面";
+    }
+  }
+
+  getFallbackIcon() {
+    return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23CBD5E1'/%3E%3Ccircle cx='12' cy='12' r='5' fill='%235D6E80'/%3E%3C/svg%3E";
+  }
+
+  toggleLoading(isLoading) {
+    document.getElementById("loading").hidden = !isLoading;
+    document.getElementById("content").hidden = isLoading;
+  }
+
+  showNotification(message, type = "success") {
+    document.querySelector(".toast")?.remove();
+
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = message;
+
+    if (type === "error") {
+      toast.style.background = "rgba(153, 27, 27, 0.92)";
+    }
+
+    document.body.appendChild(toast);
+    window.setTimeout(() => toast.remove(), 2200);
   }
 
   sendMessage(message) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(message, resolve);
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve(response);
+      });
     });
   }
 
   escapeHtml(text) {
-    const div = document.createElement('div');
+    const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
   }
-
-  generateAccessIndicators(count) {
-    if (count === 0) return '';
-    
-    let indicators = '';
-    
-    if (count <= 10) {
-      // 1-10次：显示对应数量的小圆点
-      for (let i = 0; i < count; i++) {
-        const opacity = Math.max(0.3, 1 - (i * 0.1)); // 渐变透明度效果
-        indicators += `<span class="access-dot" style="opacity: ${opacity}">●</span>`;
-      }
-    } else if (count <= 20) {
-      // 11-20次：显示10个圆点 + 数字
-      for (let i = 0; i < 10; i++) {
-        const opacity = Math.max(0.3, 1 - (i * 0.1));
-        indicators += `<span class="access-dot" style="opacity: ${opacity}">●</span>`;
-      }
-      indicators += `<span class="access-plus">+${count - 10}</span>`;
-    } else {
-      // 20+次：显示特殊标记
-      indicators += '<span class="access-high">🔥</span>';
-      indicators += `<span class="access-count-badge">${count}</span>`;
-    }
-    
-    return `<div class="access-indicators">${indicators}</div>`;
-  }
-
-  showNotification(message) {
-    // 简单的通知显示
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      background: #10b981;
-      color: white;
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-size: 12px;
-      z-index: 1000;
-    `;
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      notification.remove();
-    }, 2000);
-  }
-
-  addDebugButton() {
-    // 添加调试按钮容器
-    const debugContainer = document.createElement('div');
-    debugContainer.style.cssText = `
-      display: flex;
-      gap: 4px;
-      margin-top: 8px;
-    `;
-    
-    // 调试按钮
-    const debugBtn = document.createElement('button');
-    debugBtn.textContent = '🔍 调试';
-    debugBtn.style.cssText = `
-      flex: 1;
-      padding: 6px;
-      background: #f3f4f6;
-      border: 1px solid #d1d5db;
-      border-radius: 4px;
-      font-size: 11px;
-      cursor: pointer;
-    `;
-    
-    debugBtn.addEventListener('click', async () => {
-      const results = await this.sendMessage({ action: 'debugAccessCounts' });
-      console.log('📊 当前访问计数:', results);
-      console.table(results.map(tab => ({
-        标题: tab.title.substring(0, 30),
-        访问次数: tab.accessCount || 0,
-        ID: tab.tabId
-      })));
-      this.showNotification('调试信息已输出到控制台');
-    });
-    
-    // 重置按钮
-    const resetBtn = document.createElement('button');
-    resetBtn.textContent = '🧹 重置';
-    resetBtn.style.cssText = `
-      flex: 1;
-      padding: 6px;
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      border-radius: 4px;
-      font-size: 11px;
-      cursor: pointer;
-      color: #dc2626;
-    `;
-    
-    resetBtn.addEventListener('click', async () => {
-      if (confirm('确定要重置所有访问计数吗？此操作不可撤销。')) {
-        // 获取所有访问计数键并删除
-        chrome.storage.local.get(null, (allKeys) => {
-          const accessCountKeys = Object.keys(allKeys).filter(key => 
-            key.startsWith('access_count_')
-          );
-          
-          if (accessCountKeys.length > 0) {
-            chrome.storage.local.remove(accessCountKeys, () => {
-              this.showNotification(`已重置 ${accessCountKeys.length} 个访问计数`);
-              setTimeout(() => this.loadTabs(), 1000);
-            });
-          } else {
-            this.showNotification('没有找到访问计数数据');
-          }
-        });
-      }
-    });
-    
-    debugContainer.appendChild(debugBtn);
-    debugContainer.appendChild(resetBtn);
-    document.getElementById('content').appendChild(debugContainer);
-  }
 }
 
-// 初始化popup
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener("DOMContentLoaded", () => {
   new PopupManager();
 });

@@ -10,11 +10,6 @@ class TabPriorityManager {
 
   init() {
     console.log('🚀 TabPriorityManager 初始化...');
-    
-    // 监听快捷键命令
-    chrome.commands.onCommand.addListener((command) => {
-      this.handleCommand(command);
-    });
 
     // 监听标签页更新  
     chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -87,27 +82,13 @@ class TabPriorityManager {
     }
   }
 
-  async handleCommand(command) {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    switch (command) {
-      case 'mark-priority-1':
-        await this.setTabPriority(activeTab.id, 1);
-        break;
+  stripManagedDecorations(title = '') {
+    const cleanedTitle = title.replace(
+      /^(?:(?:[🔥⭐📁]\s*)|(?:●{1,5}🔘{0,5}\s*)|(?:●{3}\[\d+\]\s*)|(?:⚡\[\d+\]\s*)|(?:\[\d+\]\s*))+/gu,
+      ''
+    ).trim();
 
-      case 'mark-priority-3':
-        await this.setTabPriority(activeTab.id, 3);
-        break;
-      case 'switch-priority-tabs':
-        await this.switchBetweenPriorityTabs();
-        break;
-      case 'switch-priority-tabs-left':
-        await this.switchBetweenPriorityTabs('left');
-        break;
-      case 'switch-priority-tabs-right':
-        await this.switchBetweenPriorityTabs('right');
-        break;
-    }
+    return cleanedTitle || title;
   }
 
   async setTabPriority(tabId, priority) {
@@ -154,7 +135,6 @@ class TabPriorityManager {
   async updateTabDisplay(tabId) {
     try {
       const priority = await this.getTabPriority(tabId);
-      const accessCount = await this.getAccessCount(tabId);
       const tab = await chrome.tabs.get(tabId);
       
       // 更新标签页标题
@@ -164,80 +144,22 @@ class TabPriorityManager {
       };
       
       const priorityIcon = priorityIcons[priority];
-      
-      // 生成访问次数指示器
-      const accessIndicator = this.generateTitleAccessIndicator(accessCount);
-      
+
       // 清理原标题（移除之前的图标和指示器）
-      const originalTitle = tab.title
-        .replace(/^[🔥⭐📁●🔘⚪]+\s*/, '') // 移除所有可能的图标
-        .replace(/\s*\[\d+\]$/, '') // 移除数字标记
-        .replace(/\s*●+$/, ''); // 移除圆点
+      const originalTitle = this.stripManagedDecorations(tab.title);
       
-      // 组合新标题
-      const newTitle = `${priorityIcon}${accessIndicator} ${originalTitle}`;
+      // 访问次数只在 popup 中展示，不再写回标签标题
+      const newTitle = `${priorityIcon} ${originalTitle}`;
       
       // 通过content script更新标题
       chrome.tabs.sendMessage(tabId, {
         action: 'updateTitle',
         title: newTitle,
-        priority: priority,
-        accessCount: accessCount
+        priority: priority
       }).catch(() => {});
       
     } catch (error) {
       console.error('更新标签显示失败:', error);
-    }
-  }
-
-  generateTitleAccessIndicator(count) {
-    if (count === 0) return '';
-    
-    if (count <= 5) {
-      // 1-5次：显示对应数量的小圆点
-      return '●'.repeat(count);
-    } else if (count <= 10) {
-      // 6-10次：显示5个圆点 + 中等圆点
-      return '●●●●●' + '🔘'.repeat(Math.min(count - 5, 5));
-          } else if (count <= 20) {
-        // 11-20次：显示简化形式 + 数字
-        return `●●●[${count}]`;
-      } else {
-        // 20+次：高频标记
-        return `⚡[${count}]`;
-      }
-  }
-
-  async switchBetweenPriorityTabs(direction = 'right') {
-    try {
-      const tabs = await chrome.tabs.query({ currentWindow: true });
-      const priorityTabs = [];
-      
-      // 获取所有常驻标签
-      for (const tab of tabs) {
-        const priority = await this.getTabPriority(tab.id);
-        if (priority === 1) {
-          priorityTabs.push(tab);
-        }
-      }
-      
-      if (priorityTabs.length <= 1) return;
-      
-      // 找到当前激活的标签
-      const activeTab = priorityTabs.find(tab => tab.active);
-      const currentIndex = priorityTabs.indexOf(activeTab);
-      
-      // 切换到下一个常驻标签
-      let nextIndex;
-      if (direction === 'left') {
-        nextIndex = (currentIndex - 1 + priorityTabs.length) % priorityTabs.length;
-      } else {
-        nextIndex = (currentIndex + 1) % priorityTabs.length;
-      }
-      await chrome.tabs.update(priorityTabs[nextIndex].id, { active: true });
-      
-    } catch (error) {
-      console.error('切换常驻标签失败:', error);
     }
   }
 
@@ -294,29 +216,6 @@ class TabPriorityManager {
       return result[`access_count_${tabId}`] || 0;
     } catch (error) {
       return 0;
-    }
-  }
-
-  async debugAllAccessCounts() {
-    try {
-      const tabs = await chrome.tabs.query({ currentWindow: true });
-      const results = [];
-      
-      for (const tab of tabs) {
-        const count = await this.getAccessCount(tab.id);
-        results.push({
-          tabId: tab.id,
-          title: tab.title,
-          url: tab.url,
-          accessCount: count
-        });
-      }
-      
-      console.log('📊 所有标签的访问计数:', results);
-      return results;
-    } catch (error) {
-      console.error('调试访问计数失败:', error);
-      return [];
     }
   }
 
@@ -482,15 +381,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       tabManager.getAccessCount(request.tabId).then(sendResponse);
       return true;
       
-    case 'debugAccessCounts':
-      // 调试功能：显示所有标签的访问计数
-      tabManager.debugAllAccessCounts().then(sendResponse);
-      return true;
-      
     case 'getCurrentTabId':
       // 获取当前标签ID
       chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
         sendResponse(tabs[0]?.id);
+      });
+      return true;
+
+    case 'requestPriorityUpdate':
+      if (!sender.tab?.id) {
+        sendResponse({ success: false });
+        return false;
+      }
+
+      tabManager.updateTabDisplay(sender.tab.id).then(() => {
+        sendResponse({ success: true });
       });
       return true;
   }
